@@ -1,0 +1,13 @@
+/// <reference types="astro/client" />
+
+declare namespace JSX {
+    interface IntrinsicAttributes {
+      'client:only'?: string;
+      'client:visible'?: boolean | string;
+      'client:load'?: boolean | string;
+      'client:idle'?: boolean | string;
+      'client:media'?: string;
+      'client:intersect'?: string;
+    }
+  }
+  

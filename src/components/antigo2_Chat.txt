@@ -1,0 +1,169 @@
+import React, { useState, useEffect, useRef } from "react";
+import ReactMarkdown from "react-markdown";
+import { loadChatHistory, saveChatHistory } from "./loadSaveChatHistory";
+
+interface Message {
+  role: "user" | "assistant";
+  content: string;
+}
+
+const Chat: React.FC = () => {
+  const [input, setInput] = useState("");
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Scroll automático para a última mensagem
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
+  // Carrega histórico ao montar o componente
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const savedMessages = await loadChatHistory();
+        if (savedMessages && savedMessages.length > 0) {
+          setMessages(savedMessages);
+        }
+      } catch (error) {
+        console.error("Erro ao carregar histórico de chat:", error);
+      }
+    };
+    load();
+  }, []);
+
+  // Salva automaticamente o histórico quando mensagens mudam
+  useEffect(() => {
+    const save = async () => {
+      try {
+        await saveChatHistory(messages);
+      } catch (error) {
+        console.error("Erro ao salvar histórico de chat:", error);
+      }
+    };
+    if (messages.length > 0) {
+      save();
+    }
+  }, [messages]);
+
+  const sendMessage = async () => {
+    if (input.trim() === "") return;
+
+    setIsLoading(true);
+
+    const newUserMessage: Message = { role: "user", content: input.trim() };
+    setMessages((prev) => [...prev, newUserMessage]);
+    setInput("");
+
+    try {
+      const response = await fetch("/api/chat", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ messages: [...messages, newUserMessage] }),
+      });
+
+      if (!response.body) throw new Error("Resposta sem corpo");
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let assistantContent = "";
+
+      // Adiciona uma mensagem de placeholder
+      setMessages((prev) => [...prev, { role: "assistant", content: "" }]);
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value, { stream: true });
+
+        // Cada linha NDJSON separada por \n
+        const lines = chunk.split("\n").filter((line) => line.trim() !== "");
+
+        for (const line of lines) {
+          try {
+            const parsed = JSON.parse(line);
+            if (parsed.message?.content) {
+              assistantContent += parsed.message.content;
+              setMessages((prev) =>
+                prev.map((msg, idx) =>
+                  idx === prev.length - 1 ? { ...msg, content: assistantContent } : msg
+                )
+              );
+            }
+          } catch (err) {
+            console.error("Erro ao interpretar NDJSON:", err, line);
+          }
+        }
+      }
+    } catch (error) {
+      console.error("Erro ao enviar mensagem:", error);
+      setMessages((prev) => [
+        ...prev,
+        { role: "assistant", content: "Erro ao processar sua solicitação." },
+      ]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
+  };
+
+  return (
+    <div className="chat-container p-4 max-w-3xl mx-auto bg-white shadow-lg rounded-lg">
+      <h1 className="text-3xl font-bold text-center mb-4">Chat com Gemma</h1>
+      <div className="chat-body h-96 overflow-y-auto border rounded-lg p-4 bg-gray-100">
+        {messages.map((message, index) => (
+          <div
+            key={index}
+            className={`mb-2 flex ${
+              message.role === "user" ? "justify-end" : "justify-start"
+            }`}
+          >
+            <div
+              className={`max-w-xs px-4 py-2 rounded-lg whitespace-pre-wrap ${
+                message.role === "user"
+                  ? "bg-blue-500 text-white"
+                  : "bg-gray-300 text-black"
+              }`}
+            >
+              <ReactMarkdown>{message.content}</ReactMarkdown>
+            </div>
+          </div>
+        ))}
+        <div ref={messagesEndRef} />
+      </div>
+
+      <div className="message-input mt-4 flex gap-2">
+        <input
+          type="text"
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={handleKeyDown}
+          placeholder="Digite sua mensagem..."
+          className="flex-1 border border-gray-400 rounded-lg py-2 px-4 focus:outline-none focus:ring-2 focus:ring-blue-500 text-black"
+          disabled={isLoading}
+          aria-label="Campo de entrada de mensagem"
+        />
+        <button
+          onClick={sendMessage}
+          disabled={isLoading}
+          className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg disabled:opacity-50"
+          aria-label="Botão para enviar mensagem"
+        >
+          {isLoading ? "Enviando..." : "Enviar"}
+        </button>
+      </div>
+    </div>
+  );
+};
+
+export default Chat;

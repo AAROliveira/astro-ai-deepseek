@@ -1,0 +1,33 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "Node",
+    "jsx": "react-jsx",
+    "jsxImportSource": "react",
+    "strict": true,
+    "allowSyntheticDefaultImports": true,
+    "esModuleInterop": true,
+    "baseUrl": ".",
+    "paths": {
+      "~/*": [
+        "./src/*"
+      ]
+    },
+    // Inclui os tipos necessários
+    "types": [
+      "vite/client",
+      "react",
+      "react-dom",
+      "./src/types/global.d.ts"
+    ]
+  },
+  "include": [
+    "src",
+    "astro.config.*"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist"
+  ]
+}

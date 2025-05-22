@@ -1,0 +1,43 @@
+# Node
+
+node_modules
+
+dist
+
+.astro
+
+.cache
+
+.vite
+
+
+
+# IDEs
+
+.vscode/
+
+.idea/
+
+
+
+# Logs
+
+*.log
+
+
+
+# Dados temporários
+
+estrutura*.txt
+
+debug.log
+
+combined.txt
+
+
+
+# Ambiente
+
+.env
+
+.env.*

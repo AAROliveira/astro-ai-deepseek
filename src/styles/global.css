@@ -1,0 +1,4 @@
+/* Este arquivo usa Tailwind CSS */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
