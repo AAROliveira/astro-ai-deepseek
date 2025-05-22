@@ -7,6 +7,7 @@ interface Message {
   role: "user" | "assistant";
   content: string;
   fileUrl?: string;
+  isError?: boolean;
 }
 
 const Chat: React.FC = () => {
@@ -16,6 +17,7 @@ const Chat: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [copiedMessageKey, setCopiedMessageKey] = useState<number | null>(null);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -114,10 +116,14 @@ const Chat: React.FC = () => {
         }
       }
     } catch (error) {
-      console.error("Erro ao enviar mensagem:", error);
+      console.error("Detailed error:", error); 
+      let errorMessage = "Ocorreu um erro inesperado. Por favor, tente novamente.";
+      if (error instanceof Error) {
+        errorMessage = error.message;
+      }
       setMessages((prev) => [
         ...prev,
-        { role: "assistant", content: "Erro ao processar sua solicitação." },
+        { role: "assistant", content: errorMessage, isError: true },
       ]);
     } finally {
       setIsLoading(false);
@@ -131,8 +137,22 @@ const Chat: React.FC = () => {
     }
   };
 
+  const handleCopy = async (text: string, key: number) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedMessageKey(key);
+      setTimeout(() => {
+        setCopiedMessageKey(null);
+      }, 2000);
+    } catch (err) {
+      console.error("Failed to copy text: ", err);
+      // Optionally: display a toast or other feedback for copy failure
+    }
+  };
+
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center bg-gray-200 text-black px-10 sm:px-20 lg:px-32 py-20 sm:py-32 lg:py-40 font-serif">
+    <div className="min-h-screen flex flex-col items-center justify-center bg-gray-200 text-black font-serif">
+      {/* O padding foi removido daqui e é gerenciado pelo Layout.astro */}
       <div className="w-full max-w-3xl flex flex-col overflow-hidden shadow-xl rounded-2xl border-2 border-gray-300 bg-gray-100">
         {/* Cabeçalho */}
         <div className="p-6 text-2xl font-bold text-center border-b-2 border-gray-300 bg-gray-100">
@@ -152,12 +172,28 @@ const Chat: React.FC = () => {
                   }`}
               >
                 <div
-                  className={`max-w-xl px-4 py-3 rounded-lg shadow-sm whitespace-pre-wrap transition-all duration-300 ${message.role === "user"
+                  className={`relative max-w-2xl px-4 py-3 rounded-xl shadow-sm whitespace-pre-wrap transition-all duration-300 ${
+                    message.isError
+                      ? "bg-red-200 text-red-800 self-start" // Error messages are from assistant
+                      : message.role === "user"
                       ? "bg-blue-200 text-black self-end"
-                      : "bg-gray-100 text-black self-start"
-                    }`}
+                      : "bg-slate-50 text-black self-start" // Assistant messages slightly different bg
+                  }`}
                 >
-                  <ReactMarkdown>{message.content}</ReactMarkdown>
+                  {message.role === "assistant" && !message.isError && (
+                    <button
+                      onClick={() => handleCopy(message.content, index)}
+                      className="absolute top-2 right-2 p-1 text-xs bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-md"
+                      aria-label="Copy message to clipboard"
+                    >
+                      {copiedMessageKey === index ? "✓ Copied" : "📋 Copy"}
+                    </button>
+                  )}
+                  <div className={message.role === "assistant" && !message.isError ? "pr-10" : ""}> 
+                    {/* Add padding-right for copy button space only for assistant non-error messages */}
+                    <ReactMarkdown>{`${message.isError ? "⚠️ " : ""}${message.content}`}</ReactMarkdown>
+                  </div>
+                  {/* Removed the pb-4 div, relying on pr-10 and button positioning */}
                   {message.fileUrl && (
                     <a
                       href={message.fileUrl}
@@ -173,8 +209,11 @@ const Chat: React.FC = () => {
             ))}
           </AnimatePresence>
           {isLoading && (
-            <div className="text-sm text-gray-500 animate-pulse">
-              Gemma está digitando...
+            <div className="flex items-center space-x-1 text-sm text-gray-500">
+              <span>Gemma está digitando</span>
+              <span className="animate-bounce delay-0">.</span>
+              <span className="animate-bounce delay-150">.</span>
+              <span className="animate-bounce delay-300">.</span>
             </div>
           )}
           <div ref={messagesEndRef} />
@@ -188,18 +227,36 @@ const Chat: React.FC = () => {
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder="Digite sua mensagem..."
-            className="flex-1 px-4 py-2 border rounded-md text-base bg-gray-700 text-black focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className={`flex-1 px-4 py-2 border border-gray-300 rounded-md text-base bg-white text-black focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 ${
+              isLoading ? "opacity-50 cursor-not-allowed" : ""
+            }`}
             disabled={isLoading}
           />
-          <input
-            type="file"
-            onChange={(e) => setFile(e.target.files?.[0] || null)}
-            className="text-sm text-gray-600"
-          />
+          <div className="flex flex-col items-start">
+            <input
+              type="file"
+              data-testid="file-input"
+              onChange={(e) => setFile(e.target.files?.[0] || null)}
+              className={`text-sm text-gray-600 file:mr-2 file:py-2 file:px-3 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 ${
+                isLoading ? "opacity-50 cursor-not-allowed" : ""
+              }`}
+              disabled={isLoading}
+            />
+            {file && (
+              <div className="text-xs text-gray-500 mt-1 pl-1">
+                <p className="truncate max-w-xs">Arquivo: {file.name}</p>
+                {file.type.startsWith("text/") && (
+                  <p>Primeiras 200 linhas únicas serão usadas.</p>
+                )}
+              </div>
+            )}
+          </div>
           <button
             onClick={sendMessage}
             disabled={isLoading}
-            className="px-4 py-2 bg-blue-500 text-white font-semibold rounded-md hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
+            className={`px-4 py-2 bg-blue-500 text-white font-semibold rounded-md hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed ${
+              isLoading ? "opacity-50 cursor-not-allowed" : ""
+            }`}
           >
             {isLoading ? "Enviando..." : "Enviar"}
           </button>
