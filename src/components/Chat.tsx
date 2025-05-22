@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
 import { loadChatHistory, saveChatHistory } from "./loadSaveChatHistory";
 import { motion, AnimatePresence } from "framer-motion";
@@ -18,6 +18,15 @@ const Chat: React.FC = () => {
   const [file, setFile] = useState<File | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [copiedMessageKey, setCopiedMessageKey] = useState<number | null>(null);
+  const [isRecording, setIsRecording] = useState(false);
+  const [speechRecognition, setSpeechRecognition] = useState<SpeechRecognition | null>(null);
+  const [permissionError, setPermissionError] = useState<string | null>(null);
+  // TTS states
+  const [speechSynthesisApi, setSpeechSynthesisApi] = useState<SpeechSynthesis | null>(null);
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [ttsEnabled, setTtsEnabled] = useState(true); // User control can be added later
+  const [ttsError, setTtsError] = useState<string | null>(null);
+
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -137,6 +146,146 @@ const Chat: React.FC = () => {
     }
   };
 
+  // Initialize SpeechRecognition & SpeechSynthesis
+  useEffect(() => {
+    // SpeechRecognition (STT)
+    const SpeechRecognitionAPI = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (SpeechRecognitionAPI) {
+      const recognitionInstance = new SpeechRecognitionAPI();
+      recognitionInstance.continuous = false;
+      recognitionInstance.interimResults = false;
+      recognitionInstance.lang = "pt-BR";
+
+      recognitionInstance.onresult = (event: SpeechRecognitionEvent) => {
+        const transcript = event.results[0][0].transcript;
+        setInput(transcript);
+        // setIsRecording(false); // onend will handle this
+      };
+
+      recognitionInstance.onerror = (event: SpeechRecognitionErrorEvent) => {
+        console.error("Speech recognition error", event.error);
+        setPermissionError(`Erro no STT: ${event.error}`);
+        setIsRecording(false);
+      };
+
+      recognitionInstance.onend = () => {
+        setIsRecording(false);
+      };
+
+      setSpeechRecognition(recognitionInstance);
+    } else {
+      setPermissionError("Seu navegador não suporta a Web Speech API.");
+    }
+
+    // SpeechSynthesis (TTS)
+    if ('speechSynthesis' in window) {
+      setSpeechSynthesisApi(window.speechSynthesis);
+      // Ensure voices are loaded
+      const loadVoices = () => {
+        const voices = window.speechSynthesis.getVoices();
+        if (voices.length === 0) {
+          window.speechSynthesis.onvoiceschanged = loadVoices;
+        }
+        // Optional: log voices to see available options
+        // console.log("Available voices:", voices);
+      };
+      loadVoices();
+    } else {
+      setTtsError("Seu navegador não suporta a Web Speech API (para TTS).");
+    }
+  }, [setInput]); // setInput is a dependency for STT part
+
+  const speakText = useCallback((text: string) => {
+    if (!speechSynthesisApi || !ttsEnabled || text.trim() === "") {
+      return;
+    }
+
+    if (speechSynthesisApi.speaking) {
+      speechSynthesisApi.cancel(); // Stop current speech if any
+    }
+
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = "pt-BR";
+    
+    // Attempt to find a preferred voice (e.g., Google's Portuguese voice)
+    const voices = speechSynthesisApi.getVoices();
+    const ptBRVoice = voices.find(voice => voice.lang === "pt-BR" && voice.name.includes("Google") && voice.name.includes("Brasil")) ||
+                      voices.find(voice => voice.lang === "pt-BR" && voice.name.includes("Google")) ||
+                      voices.find(voice => voice.lang === "pt-BR" && voice.localService) || // Prefer local voices
+                      voices.find(voice => voice.lang === "pt-BR"); // Fallback to any pt-BR
+    
+    if (ptBRVoice) {
+      utterance.voice = ptBRVoice;
+      // console.log("Using voice:", ptBRVoice.name);
+    } else {
+      // console.log("Using default voice for pt-BR.");
+    }
+
+    utterance.onstart = () => {
+      setIsSpeaking(true);
+      setTtsError(null);
+    };
+
+    utterance.onend = () => {
+      setIsSpeaking(false);
+    };
+
+    utterance.onerror = (event: SpeechSynthesisErrorEvent) => {
+      console.error("Speech synthesis error", event.error);
+      setTtsError(`Erro no TTS: ${event.error}`);
+      setIsSpeaking(false);
+    };
+
+    speechSynthesisApi.speak(utterance);
+
+  }, [speechSynthesisApi, ttsEnabled]); // Removed isSpeaking from deps to avoid re-creating if it changes rapidly
+
+  // Effect to speak the latest assistant message
+  useEffect(() => {
+    if (messages.length > 0) {
+      const lastMessage = messages[messages.length - 1];
+      if (lastMessage.role === "assistant" && !lastMessage.isError && lastMessage.content) {
+        // Only speak if the message content is substantial (not just an empty string from initialization)
+        // And if the message is fully formed (not streaming character by character if that were the case)
+        // The current setup updates the whole content, so cancel() in speakText handles re-speaking.
+        speakText(lastMessage.content);
+      }
+    }
+  }, [messages, speakText]);
+
+
+  const handleToggleRecording = useCallback(async () => {
+    if (!speechRecognition) {
+      setPermissionError("Reconhecimento de voz não está disponível.");
+      return;
+    }
+
+    if (isRecording) {
+      speechRecognition.stop();
+      setIsRecording(false);
+    } else {
+      setPermissionError(null); // Clear previous errors
+      try {
+        // Request microphone permission
+        await navigator.mediaDevices.getUserMedia({ audio: true });
+        speechRecognition.start();
+        setIsRecording(true);
+      } catch (err) {
+        console.error("Microphone permission error", err);
+        if (err instanceof Error) {
+          if (err.name === "NotAllowedError") {
+            setPermissionError("Permissão para o microfone negada. Por favor, habilite nas configurações do seu navegador.");
+          } else {
+            setPermissionError(`Erro ao acessar microfone: ${err.message}`);
+          }
+        } else {
+          setPermissionError("Ocorreu um erro desconhecido ao tentar acessar o microfone.");
+        }
+        setIsRecording(false);
+      }
+    }
+  }, [speechRecognition, isRecording]);
+
   const handleCopy = async (text: string, key: number) => {
     try {
       await navigator.clipboard.writeText(text);
@@ -232,6 +381,18 @@ const Chat: React.FC = () => {
             }`}
             disabled={isLoading}
           />
+          <button
+            onClick={handleToggleRecording}
+            disabled={isLoading || !speechRecognition || isRecording || isSpeaking}
+            className={`px-3 py-2 ml-2 rounded-md text-white ${
+              isRecording ? "bg-red-500 hover:bg-red-600" : "bg-green-500 hover:bg-green-600"
+            } focus:outline-none focus:ring-2 focus:ring-offset-2 ${
+              (!speechRecognition || isSpeaking) ? "opacity-50 cursor-not-allowed" : "" // Apply disabled style if no API or if speaking
+            } ${isLoading ? "opacity-50 cursor-not-allowed" : ""}`}
+            title={isRecording ? "Parar gravação" : (isSpeaking ? "Aguarde o assistente terminar de falar" : "Gravar áudio")}
+          >
+            {isRecording ? "🎤 Parar" : (isSpeaking ? "..." : "🎤 Gravar")}
+          </button>
           <div className="flex flex-col items-start">
             <input
               type="file"
@@ -253,7 +414,7 @@ const Chat: React.FC = () => {
           </div>
           <button
             onClick={sendMessage}
-            disabled={isLoading}
+            disabled={isLoading || isRecording} // Disable send if recording
             className={`px-4 py-2 bg-blue-500 text-white font-semibold rounded-md hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed ${
               isLoading ? "opacity-50 cursor-not-allowed" : ""
             }`}
@@ -261,6 +422,16 @@ const Chat: React.FC = () => {
             {isLoading ? "Enviando..." : "Enviar"}
           </button>
         </div>
+        {permissionError && (
+          <div className="p-2 text-center text-sm text-red-600 bg-red-100 border-t-2 border-gray-300">
+            {permissionError}
+          </div>
+        )}
+        {ttsError && (
+          <div className="p-2 text-center text-sm text-orange-600 bg-orange-100 border-t-2 border-gray-300">
+            {ttsError}
+          </div>
+        )}
       </div>
     </div>
   );
