@@ -84,7 +84,8 @@ This application supports voice input (Speech-to-Text) and voice output (Text-to
 *   **Language Support**: Voice features are configured for Brazilian Portuguese (pt-BR).
 *   **Browser Support**: These features utilize the Web Speech API, which is best supported on modern browsers like Google Chrome and Microsoft Edge. Functionality, voice availability, and quality may vary depending on your browser and operating system.
 *   **Microphone Access**: For voice input, your browser will prompt you for microphone permission when you first use the feature. This permission is required for STT to work.
-*   **Error Notifications**: The interface will provide messages if issues occur, such as microphone permission being denied or if the Web Speech API is not supported by your browser for STT or TTS.
+*   **Important - HTTPS Requirement**: For microphone access (Speech-to-Text) to work on deployed websites (i.e., not running on `localhost`), the application **must be served over a secure connection (HTTPS)**. Browsers restrict microphone access to secure origins for privacy and security reasons.
+*   **Error Notifications**: The interface will provide messages if issues occur, such as microphone permission being denied, the Web Speech API not being supported, or if the connection is not secure for microphone use.
 
 ---
 

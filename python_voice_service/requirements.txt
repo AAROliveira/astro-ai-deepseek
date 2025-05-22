@@ -1,0 +1,12 @@
+fastapi
+uvicorn[standard]
+openai-whisper
+suno-bark
+nltk
+torch
+torchaudio
+transformers
+numpy
+scipy
+# Add any other core dependencies identified as immediately necessary.
+# For now, let's exclude sounddevice, pyaudio, speechrecognition, rich as they are for CLI.
