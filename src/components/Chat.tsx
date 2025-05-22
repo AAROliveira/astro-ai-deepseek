@@ -26,6 +26,7 @@ const Chat: React.FC = () => {
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [ttsEnabled, setTtsEnabled] = useState(true); // User control can be added later
   const [ttsError, setTtsError] = useState<string | null>(null);
+  const [hasUserInteracted, setHasUserInteracted] = useState(false);
 
 
   useEffect(() => {
@@ -59,6 +60,11 @@ const Chat: React.FC = () => {
 
   const sendMessage = async () => {
     if (input.trim() === "") return;
+
+    if (!hasUserInteracted) {
+      setHasUserInteracted(true);
+    }
+
     setIsLoading(true);
 
     let fileContent = "";
@@ -148,33 +154,40 @@ const Chat: React.FC = () => {
 
   // Initialize SpeechRecognition & SpeechSynthesis
   useEffect(() => {
-    // SpeechRecognition (STT)
-    const SpeechRecognitionAPI = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (SpeechRecognitionAPI) {
-      const recognitionInstance = new SpeechRecognitionAPI();
-      recognitionInstance.continuous = false;
-      recognitionInstance.interimResults = false;
-      recognitionInstance.lang = "pt-BR";
-
-      recognitionInstance.onresult = (event: SpeechRecognitionEvent) => {
-        const transcript = event.results[0][0].transcript;
-        setInput(transcript);
-        // setIsRecording(false); // onend will handle this
-      };
-
-      recognitionInstance.onerror = (event: SpeechRecognitionErrorEvent) => {
-        console.error("Speech recognition error", event.error);
-        setPermissionError(`Erro no STT: ${event.error}`);
-        setIsRecording(false);
-      };
-
-      recognitionInstance.onend = () => {
-        setIsRecording(false);
-      };
-
-      setSpeechRecognition(recognitionInstance);
+    // Pre-check for navigator.mediaDevices (essential for STT)
+    if (typeof navigator.mediaDevices === 'undefined' || typeof navigator.mediaDevices.getUserMedia === 'undefined') {
+      setPermissionError("Erro: Acesso ao microfone requer uma conexão segura (HTTPS) ou execução em localhost. Verifique se o site está em HTTPS.");
+      setSpeechRecognition(null); // Ensure STT is disabled
     } else {
-      setPermissionError("Seu navegador não suporta a Web Speech API.");
+      // SpeechRecognition (STT)
+      const SpeechRecognitionAPI = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      if (SpeechRecognitionAPI) {
+        const recognitionInstance = new SpeechRecognitionAPI();
+        recognitionInstance.continuous = false;
+        recognitionInstance.interimResults = false;
+        recognitionInstance.lang = "pt-BR";
+
+        recognitionInstance.onresult = (event: SpeechRecognitionEvent) => {
+          const transcript = event.results[0][0].transcript;
+          setInput(transcript);
+          // setIsRecording(false); // onend will handle this
+        };
+
+        recognitionInstance.onerror = (event: SpeechRecognitionErrorEvent) => {
+          console.error("Speech recognition error", event.error);
+          setPermissionError(`Erro no STT: ${event.error}`);
+          setIsRecording(false);
+        };
+
+        recognitionInstance.onend = () => {
+          setIsRecording(false);
+        };
+
+        setSpeechRecognition(recognitionInstance);
+      } else {
+        setPermissionError("Seu navegador não suporta a Web Speech API (para STT).");
+        setSpeechRecognition(null); // Ensure STT is disabled
+      }
     }
 
     // SpeechSynthesis (TTS)
@@ -193,10 +206,13 @@ const Chat: React.FC = () => {
     } else {
       setTtsError("Seu navegador não suporta a Web Speech API (para TTS).");
     }
-  }, [setInput]); // setInput is a dependency for STT part
+  }, [setInput]); // setInput is a dependency for STT part, adding setPermissionError and setSpeechRecognition as they are now used in this effect.
 
   const speakText = useCallback((text: string) => {
-    if (!speechSynthesisApi || !ttsEnabled || text.trim() === "") {
+    if (!speechSynthesisApi || !ttsEnabled || !hasUserInteracted || text.trim() === "") {
+      if (!hasUserInteracted && text.trim() !== "") {
+        console.log("TTS deferred: User has not interacted yet.");
+      }
       return;
     }
 
@@ -238,7 +254,7 @@ const Chat: React.FC = () => {
 
     speechSynthesisApi.speak(utterance);
 
-  }, [speechSynthesisApi, ttsEnabled]); // Removed isSpeaking from deps to avoid re-creating if it changes rapidly
+  }, [speechSynthesisApi, ttsEnabled, hasUserInteracted]);
 
   // Effect to speak the latest assistant message
   useEffect(() => {
@@ -256,20 +272,27 @@ const Chat: React.FC = () => {
 
   const handleToggleRecording = useCallback(async () => {
     if (!speechRecognition) {
-      setPermissionError("Reconhecimento de voz não está disponível.");
+      // This message might be redundant if the useEffect already set a more specific one for HTTPS/localhost
+      if (!permissionError) { // Only set if no specific error (like HTTPS) is already present
+        setPermissionError("Reconhecimento de voz não está disponível ou foi desabilitado.");
+      }
       return;
     }
 
     if (isRecording) {
       speechRecognition.stop();
-      setIsRecording(false);
+      // setIsRecording(false); // onend will handle this
     } else {
-      setPermissionError(null); // Clear previous errors
+      setPermissionError(null); // Clear previous errors before attempting to record
       try {
-        // Request microphone permission
-        await navigator.mediaDevices.getUserMedia({ audio: true });
+        // Request microphone permission - This line will not be reached if mediaDevices is undefined due to the check in useEffect
+        // or if speechRecognition was set to null.
+        await navigator.mediaDevices.getUserMedia({ audio: true }); 
         speechRecognition.start();
         setIsRecording(true);
+        if (!hasUserInteracted) {
+          setHasUserInteracted(true);
+        }
       } catch (err) {
         console.error("Microphone permission error", err);
         if (err instanceof Error) {
@@ -284,7 +307,7 @@ const Chat: React.FC = () => {
         setIsRecording(false);
       }
     }
-  }, [speechRecognition, isRecording]);
+  }, [speechRecognition, isRecording, permissionError, hasUserInteracted]);
 
   const handleCopy = async (text: string, key: number) => {
     try {
@@ -389,9 +412,9 @@ const Chat: React.FC = () => {
             } focus:outline-none focus:ring-2 focus:ring-offset-2 ${
               (!speechRecognition || isSpeaking) ? "opacity-50 cursor-not-allowed" : "" // Apply disabled style if no API or if speaking
             } ${isLoading ? "opacity-50 cursor-not-allowed" : ""}`}
-            title={isRecording ? "Parar gravação" : (isSpeaking ? "Aguarde o assistente terminar de falar" : "Gravar áudio")}
+            title={isRecording ? "Parar gravação" : (isSpeaking ? "Aguarde o assistente terminar de falar" : (!speechRecognition ? "Gravação indisponível" : "Gravar áudio"))}
           >
-            {isRecording ? "🎤 Parar" : (isSpeaking ? "..." : "🎤 Gravar")}
+            {isRecording ? "🎤 Parar" : (isSpeaking ? "..." : (!speechRecognition ? "🚫" : "🎤 Gravar"))}
           </button>
           <div className="flex flex-col items-start">
             <input
