@@ -74,6 +74,20 @@ O projeto utiliza **Tailwind CSS** para estilização. Aqui estão algumas instr
 
 ---
 
+## 🔊 Voice Chat Features
+
+This application supports voice input (Speech-to-Text) and voice output (Text-to-Speech) for interacting with the chatbot in Brazilian Portuguese (pt-BR).
+
+**Key Information:**
+*   **Speech-to-Text (STT)**: You can click the microphone button (🎤 Gravar) to speak your messages instead of typing. The button will change to "🎤 Parar" while recording.
+*   **Text-to-Speech (TTS)**: The chatbot's responses will be automatically read aloud. While the assistant is speaking, the microphone button will be temporarily disabled and show "..." to indicate it's waiting.
+*   **Language Support**: Voice features are configured for Brazilian Portuguese (pt-BR).
+*   **Browser Support**: These features utilize the Web Speech API, which is best supported on modern browsers like Google Chrome and Microsoft Edge. Functionality, voice availability, and quality may vary depending on your browser and operating system.
+*   **Microphone Access**: For voice input, your browser will prompt you for microphone permission when you first use the feature. This permission is required for STT to work.
+*   **Error Notifications**: The interface will provide messages if issues occur, such as microphone permission being denied or if the Web Speech API is not supported by your browser for STT or TTS.
+
+---
+
 ## 📂 Estrutura do projeto
 
 - `src/components`: Contém os componentes React e Astro.
