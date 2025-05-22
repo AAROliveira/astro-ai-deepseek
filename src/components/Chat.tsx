@@ -32,35 +32,44 @@ const Chat: React.FC = () => {
   const [ttsEnabled, setTtsEnabled] = useState(true); // User control can be added later
   const [ttsError, setTtsError] = useState<string | null>(null);
   const [hasUserInteracted, setHasUserInteracted] = useState(false);
+  const [isClient, setIsClient] = useState(false);
+
+  interface MicSupportState {
+    supported: boolean;
+    error: string | null;
+    checked: boolean;
+  }
+  const [micSupport, setMicSupport] = useState<MicSupportState>({
+    supported: false,
+    error: null,
+    checked: false,
+  });
+
+  useEffect(() => {
+    setIsClient(true);
+  }, []);
+
+  useEffect(() => {
+    if (isClient) {
+      if (typeof navigator.mediaDevices === 'undefined' || typeof navigator.mediaDevices.getUserMedia === 'undefined') {
+        setMicSupport({
+          supported: false,
+          error: "Erro: Acesso ao microfone não é suportado neste navegador ou requer uma conexão segura (HTTPS) / localhost.",
+          checked: true,
+        });
+      } else {
+        setMicSupport({
+          supported: true,
+          error: null, // No initial error, permission will be asked on click
+          checked: true,
+        });
+      }
+    }
+  }, [isClient]);
 
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
-
-  useEffect(() => {
-    const load = async () => {
-      try {
-        const savedMessages = await loadChatHistory();
-        if (savedMessages && savedMessages.length > 0) {
-          setMessages(savedMessages);
-        }
-      } catch (error) {
-        console.error("Erro ao carregar histórico de chat:", error);
-      }
-    };
-    load();
-  }, []);
-
-  useEffect(() => {
-    const save = async () => {
-      try {
-        await saveChatHistory(messages);
-      } catch (error) {
-        console.error("Erro ao salvar histórico de chat:", error);
-      }
-    };
-    if (messages.length > 0) save();
   }, [messages]);
 
   const sendMessage = async () => {
@@ -159,15 +168,20 @@ const Chat: React.FC = () => {
 
 const PYTHON_BACKEND_URL = 'http://localhost:8008'; // Define backend URL
 
-// Initialize SpeechSynthesis & Check MediaDevices
+// Old useEffect that checked mediaDevices and initialized TTS is now simplified or removed for those parts.
+// This effect was previously also responsible for initializing the old Web Speech API TTS.
+// Now, it can be removed if it has no other responsibilities, or kept minimal.
+// For this task, the mediaDevices check part is removed as it's handled by the new micSupport effect.
 useEffect(() => {
-    // Pre-check for navigator.mediaDevices (essential for STT using MediaRecorder)
-    if (typeof navigator.mediaDevices === 'undefined' || typeof navigator.mediaDevices.getUserMedia === 'undefined') {
-      setPermissionError("Erro: Acesso ao microfone requer uma conexão segura (HTTPS) ou execução em localhost. Verifique se o site está em HTTPS.");
-    }
-    // TTS (Backend) does not require browser API initialization here, only fetch.
-    // The old Web Speech API TTS initialization is removed.
-  }, []); // Removed setInput dependency, as it's not used in this effect anymore.
+  // This effect used to check navigator.mediaDevices. That check is now moved
+  // to the useEffect hook that depends on `isClient` to set `micSupport`.
+  // If this effect had other initialization tasks (like for old TTS), they would be removed too.
+  // If it's now empty or only had that check, it can be removed or left as is if other initializations were here.
+  // For clarity, let's assume it's now only for other initial setup if any, or can be removed if it was solely for mediaDevices/oldTTS.
+  // The `setPermissionError` for the HTTPS/localhost issue is now handled by `setMicSupport`.
+  console.log("Initial useEffect (previously for mediaDevices check & old TTS init) now cleaner.");
+}, []);
+
 
   const playAudioFromBackend = useCallback(async (text: string) => {
     if (!ttsEnabled || !hasUserInteracted || !text.trim()) {
@@ -259,8 +273,13 @@ useEffect(() => {
 
 
   const handleToggleRecording = useCallback(async () => {
-    if (typeof navigator.mediaDevices === 'undefined' || typeof navigator.mediaDevices.getUserMedia === 'undefined') {
-        setPermissionError("Erro: Acesso ao microfone não é suportado ou requer HTTPS/localhost.");
+    if (!micSupport.checked) {
+      // Mic support hasn't been checked yet (e.g., isClient is false), do nothing.
+      console.log("Mic support not checked yet.");
+      return;
+    }
+    if (!micSupport.supported) {
+        setPermissionError(micSupport.error || "Microphone access is not supported.");
         return;
     }
     
@@ -342,9 +361,16 @@ useEffect(() => {
         setIsRecording(false); // Ensure recording state is false if permission fails
       }
     }
-  }, [isRecording, mediaRecorderState, hasUserInteracted, setInput, setPermissionError, setIsRecording, setIsTranscribing, setHasUserInteracted]);
+  }, [isRecording, mediaRecorderState, hasUserInteracted, setInput, setPermissionError, setIsRecording, setIsTranscribing, setHasUserInteracted, micSupport]); // Added micSupport
 
   const handleCopy = async (text: string, key: number) => {
+    if (typeof navigator === 'undefined' || !navigator.clipboard) {
+      console.warn("Clipboard API not available.");
+      // Optionally: set a state to inform the user that copy is not available.
+      // For now, just preventing the error and logging a warning.
+      return;
+    }
+
     try {
       await navigator.clipboard.writeText(text);
       setCopiedMessageKey(key);
@@ -441,19 +467,19 @@ useEffect(() => {
           />
           <button
             onClick={handleToggleRecording}
-            disabled={isLoading || isSpeaking || isTranscribing || isSynthesizing || typeof navigator.mediaDevices === 'undefined'}
+            disabled={!micSupport.checked || !micSupport.supported || isLoading || isSpeaking || isTranscribing || isSynthesizing}
             className={`px-3 py-2 ml-2 rounded-md text-white ${
               isRecording ? "bg-red-500 hover:bg-red-600" : "bg-green-500 hover:bg-green-600"
             } focus:outline-none focus:ring-2 focus:ring-offset-2 ${
-              (isSpeaking || isTranscribing || isSynthesizing || typeof navigator.mediaDevices === 'undefined') ? "opacity-50 cursor-not-allowed" : ""
+              (!micSupport.supported || isSpeaking || isTranscribing || isSynthesizing) ? "opacity-50 cursor-not-allowed" : ""
             } ${isLoading ? "opacity-50 cursor-not-allowed" : ""}`}
             title={
               isRecording ? "Parar gravação"
               : isTranscribing ? "Transcrevendo áudio..."
               : isSynthesizing ? "Sintetizando áudio..."
               : isSpeaking ? "Assistente falando..."
-              : permissionError?.startsWith("Erro: Acesso ao microfone requer") ? "Gravação indisponível (sem HTTPS/localhost)"
-              : (typeof navigator.mediaDevices === 'undefined') ? "Gravação indisponível (sem microfone/permissão)"
+              : !micSupport.checked ? "Verificando suporte ao microfone..."
+              : !micSupport.supported ? micSupport.error || "Gravação indisponível"
               : "Gravar áudio"
             }
           >
@@ -461,7 +487,8 @@ useEffect(() => {
               : isTranscribing ? "⌛"
               : isSynthesizing ? "🔊..."
               : isSpeaking ? "..."
-              : (typeof navigator.mediaDevices === 'undefined' || permissionError?.startsWith("Erro: Acesso ao microfone requer")) ? "🚫"
+              : !micSupport.checked ? "..."
+              : !micSupport.supported ? "🚫"
               : "🎤 Gravar"}
           </button>
           <div className="flex flex-col items-start">
@@ -493,7 +520,12 @@ useEffect(() => {
             {isLoading ? "Enviando..." : "Enviar"}
           </button>
         </div>
-        {permissionError && (
+        {(micSupport.checked && micSupport.error) && (
+          <div className="p-2 text-center text-sm text-red-600 bg-red-100 border-t-2 border-gray-300">
+            {micSupport.error}
+          </div>
+        )}
+        {permissionError && !micSupport.error && ( // Show permissionError only if no micSupport.error is present
           <div className="p-2 text-center text-sm text-red-600 bg-red-100 border-t-2 border-gray-300">
             {permissionError}
           </div>
